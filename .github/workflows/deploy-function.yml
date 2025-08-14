@@ -1,0 +1,17 @@
+# CI/CD workflow for Azure provisioning function
+name: Deploy Azure Provisioning Function
+on:
+  push:
+    paths:
+      - 'functions/provisioning-function/**'
+      - '.github/workflows/deploy-function.yml'
+  workflow_dispatch:
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      # Add build/test/deploy steps here as needed
+      - name: Placeholder for function deployment
+        run: echo "Implement Azure Function deployment here"
