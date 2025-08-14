@@ -1,4 +1,4 @@
-"""Azure Function App entry point to deploy dev environment fundamentals."""
+"""Azure Function App entry point to deploy dev environment fundamentals. Yeah."""
 
 import json
 import logging
