@@ -282,19 +282,91 @@ uv run func start
 ```
 
 ### Azure Deployment
-The function is designed for deployment as an Azure Function App with:
-- Managed Identity authentication
-- Environment variable configuration  
-- VNET integration for secure database access
-- Application Insights logging integration
 
-### Deployment Preparation
+The function has been deployed to Azure Function App with managed identity authentication.
+
+**Deployment Status**: ✅ **DEPLOYED** (August 14, 2025)
+- **Function App**: `kubemooc-provisioning-func`
+- **Endpoint**: `https://kubemooc-provisioning-func-cmgzbegwhghddtby.northeurope-01.azurewebsites.net/api/provision`
+- **Authentication**: User-assigned managed identity (`mi-provisioning-function`)
+- **Environment**: All required variables configured in Azure Portal
+
+#### Deployment Command
 ```bash
-# Ensure tests pass
-uv run pytest tests/ -v
+# Deploy updated function code to Azure
+func azure functionapp publish kubemooc-provisioning-func
+```
 
-# Build for deployment (excludes dev files via .funcignore)
-func azure functionapp publish <your-function-app-name>
+#### Required Azure Configuration
+The following environment variables are configured in the Azure Function App:
+- `AZURE_SUBSCRIPTION_ID`
+- `POSTGRES_RESOURCE_GROUP` 
+- `POSTGRES_SERVER_NAME`
+- `POSTGRES_ADMIN_USER`
+- `POSTGRES_ADMIN_PASSWORD`
+- `MANAGED_IDENTITY_RESOURCE_GROUP`
+- `MANAGED_IDENTITY_NAME`
+- `MANAGED_IDENTITY_CLIENT_ID` ⭐ **NEW** - Required for user-assigned managed identity
+- `AKS_RESOURCE_GROUP`
+- `AKS_CLUSTER_NAME`
+
+### Manual Testing
+
+#### Test Environment Provisioning
+```bash
+# Test the deployed function (replace YOUR_FUNCTION_KEY with actual key)
+curl -X POST -i \
+  -H "Content-Type: application/json" \
+  -d '{ "branch_name": "test-feature-123" }' \
+  "https://kubemooc-provisioning-func-cmgzbegwhghddtby.northeurope-01.azurewebsites.net/api/provision?code=YOUR_FUNCTION_KEY"
+```
+
+#### Expected Success Response
+```json
+{
+  "status": "success",
+  "branch_name": "test-feature-123",
+  "database_created": true,
+  "credential_created": true,
+  "namespace_created": true,
+  "message": "Environment for branch 'test-feature-123' provisioned successfully",
+  "timing": {
+    "total_duration_seconds": 2.45,
+    "database_duration_seconds": 0.82,
+    "credential_duration_seconds": 1.21,
+    "namespace_duration_seconds": 0.42
+  },
+  "correlation_id": "uuid-here"
+}
+```
+
+#### Function Key Retrieval
+```bash
+# Get the function key for manual testing
+az functionapp keys list --name kubemooc-provisioning-func --resource-group kubemooc-automation-rg
+```
+
+#### Troubleshooting
+
+**Common Issues**:
+1. **404 Not Found**: Check endpoint URL and function name
+2. **400 Bad Request**: Verify JSON payload has `branch_name` (not `branchName`)
+3. **401 Unauthorized**: Function key required in query parameter `?code=`
+4. **Authentication Errors**: Managed identity client ID must be configured
+
+**Debugging with Application Insights**:
+```kql
+// Query function execution logs
+traces
+| where timestamp > ago(1h)
+| where customDimensions.correlation_id != ""
+| order by timestamp desc
+
+// Query authentication errors  
+exceptions
+| where timestamp > ago(1h)
+| where outerMessage contains "DefaultAzureCredential"
+| order by timestamp desc
 ```
 
 Resource provisioning follows the principle of idempotency - operations can be safely retried and will not create duplicate resources.

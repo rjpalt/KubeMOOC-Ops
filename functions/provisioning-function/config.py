@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     postgres_server_name: str
     managed_identity_resource_group: str
     managed_identity_name: str
+    managed_identity_client_id: str
     aks_resource_group: str
     aks_cluster_name: str
 

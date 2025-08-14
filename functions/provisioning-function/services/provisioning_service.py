@@ -24,7 +24,10 @@ class ProvisioningService:
         """Initialize the provisioning service."""
         self.settings = settings
         self.logger = logging.getLogger(__name__)
-        self.credential = DefaultAzureCredential()
+        # Use the specific user-assigned managed identity for this function
+        self.credential = DefaultAzureCredential(
+            managed_identity_client_id=settings.managed_identity_client_id
+        )
 
     def get_postgres_client(self) -> PostgreSQLManagementClient:
         """Initialize PostgreSQL management client.
@@ -54,25 +57,7 @@ class ProvisioningService:
             self.settings.azure_subscription_id,
         )
 
-    def get_kubernetes_client(self) -> client.CoreV1Api:
-        """Initialize Kubernetes client using managed identity.
-
-        Returns:
-            Kubernetes CoreV1Api client instance
-
-        Raises:
-            Exception: If Kubernetes configuration cannot be loaded
-        """
-        try:
-            config.load_incluster_config()
-        except config.ConfigException:
-            try:
-                config.load_kube_config()
-            except config.ConfigException:
-                self.logger.exception("Failed to load Kubernetes configuration")
-                raise
-
-        return client.CoreV1Api()
+    # Note: Kubernetes operations use Azure SDK to get credentials then Kubernetes Python client
 
     def create_database(self, database_name: str) -> bool:
         """Create a new database on the PostgreSQL server.
@@ -103,9 +88,7 @@ class ProvisioningService:
             "Starting database creation",
             extra={
                 "operation": "create_database",
-                "database_name": database_name,
-                "postgres_host": self.settings.postgres_host,
-                "postgres_user": self.settings.postgres_admin_user
+                "database_name": database_name
             }
         )
 
@@ -115,9 +98,7 @@ class ProvisioningService:
                 "Attempting PostgreSQL connection",
                 extra={
                     "operation": "create_database",
-                    "database_name": database_name,
-                    "host": self.settings.postgres_host,
-                    "port": 5432
+                    "database_name": database_name
                 }
             )
             
@@ -350,7 +331,7 @@ class ProvisioningService:
             return True
 
     def create_namespace(self, namespace_name: str) -> bool:
-        """Create Kubernetes namespace.
+        """Create Kubernetes namespace using Azure SDK and Kubernetes client.
 
         Args:
             namespace_name: Name of the namespace to create
@@ -362,7 +343,7 @@ class ProvisioningService:
             Exception: If namespace creation fails
         """
         self.logger.info(
-            "Starting Kubernetes namespace creation",
+            "Starting Kubernetes namespace creation using Azure SDK",
             extra={
                 "operation": "create_namespace",
                 "namespace_name": namespace_name,
@@ -371,88 +352,97 @@ class ProvisioningService:
         )
         
         try:
-            k8s_client = self.get_kubernetes_client()
-            
-            self.logger.debug(
-                "Kubernetes client initialized",
-                extra={
-                    "operation": "create_namespace",
-                    "namespace_name": namespace_name
-                }
+            # Get AKS cluster credentials using Azure SDK
+            container_client = ContainerServiceClient(
+                self.credential,
+                self.settings.azure_subscription_id,
             )
-
-            # Check if namespace already exists
+            
+            # Get cluster admin credentials
+            credential_results = container_client.managed_clusters.list_cluster_admin_credentials(
+                resource_group_name=self.settings.aks_resource_group,
+                resource_name=self.settings.aks_cluster_name,
+            )
+            
+            if not credential_results.kubeconfigs:
+                raise Exception("No kubeconfig found for AKS cluster")
+            
+            # Load kubeconfig from Azure SDK result
+            import tempfile
+            import os
+            
+            kubeconfig_content = credential_results.kubeconfigs[0].value.decode('utf-8')
+            
+            # Create temporary kubeconfig file
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+                f.write(kubeconfig_content)
+                temp_kubeconfig_path = f.name
+            
             try:
-                existing_ns = k8s_client.read_namespace(name=namespace_name)
-                self.logger.warning(
-                    "Namespace already exists",
-                    extra={
-                        "operation": "create_namespace",
-                        "namespace_name": namespace_name,
-                        "status": "already_exists",
-                        "creation_timestamp": str(existing_ns.metadata.creation_timestamp),
-                        "uid": existing_ns.metadata.uid
-                    }
-                )
-                return True
-            except client.ApiException as e:
-                if e.status != HTTP_NOT_FOUND:
-                    self.logger.error(
-                        "Error checking namespace existence",
+                # Load configuration from temporary file
+                config.load_kube_config(config_file=temp_kubeconfig_path)
+                self.logger.info("Successfully loaded AKS credentials")
+                
+                # Initialize Kubernetes client
+                k8s_client = client.CoreV1Api()
+                
+                # Check if namespace already exists
+                try:
+                    existing_ns = k8s_client.read_namespace(name=namespace_name)
+                    self.logger.warning(
+                        "Namespace already exists",
                         extra={
                             "operation": "create_namespace",
                             "namespace_name": namespace_name,
-                            "error_type": "k8s_api_error",
-                            "error_status": e.status,
-                            "error_reason": e.reason,
-                            "error_message": str(e)
+                            "status": "already_exists",
+                            "creation_timestamp": str(existing_ns.metadata.creation_timestamp),
+                            "uid": existing_ns.metadata.uid
                         }
                     )
-                    raise
+                    return True
+                except client.ApiException as e:
+                    if e.status != HTTP_NOT_FOUND:
+                        self.logger.error(f"Error checking namespace existence: {e}")
+                        raise
+                    
+                    self.logger.debug("Namespace does not exist, proceeding with creation")
+
+                # Create namespace with labels
+                labels = {
+                    "app.kubernetes.io/managed-by": "provisioning-function",
+                    "provisioning.kubernetes.io/branch": namespace_name,
+                    "dev-gateway-access": "allowed",  # Required for AGC gateway access
+                }
                 
-                self.logger.debug(
-                    "Namespace does not exist, proceeding with creation",
-                    extra={
-                        "operation": "create_namespace",
-                        "namespace_name": namespace_name
-                    }
+                self.logger.info(f"Creating namespace: {namespace_name} with labels: {labels}")
+                
+                namespace_manifest = client.V1Namespace(
+                    metadata=client.V1ObjectMeta(
+                        name=namespace_name,
+                        labels=labels,
+                    ),
                 )
 
-            # Create namespace
-            labels = {
-                "app.kubernetes.io/managed-by": "provisioning-function",
-                "provisioning.kubernetes.io/branch": namespace_name,
-            }
-            
-            self.logger.info(
-                "Creating namespace with labels",
-                extra={
-                    "operation": "create_namespace",
-                    "namespace_name": namespace_name,
-                    "labels": labels
-                }
-            )
-            
-            namespace_manifest = client.V1Namespace(
-                metadata=client.V1ObjectMeta(
-                    name=namespace_name,
-                    labels=labels,
-                ),
-            )
-
-            created_ns = k8s_client.create_namespace(body=namespace_manifest)
-            
-            self.logger.info(
-                "Kubernetes namespace created successfully",
-                extra={
-                    "operation": "create_namespace",
-                    "namespace_name": namespace_name,
-                    "status": "created",
-                    "creation_timestamp": str(created_ns.metadata.creation_timestamp),
-                    "uid": created_ns.metadata.uid,
-                    "labels_applied": labels
-                }
-            )
+                created_ns = k8s_client.create_namespace(body=namespace_manifest)
+                
+                self.logger.info(
+                    "Kubernetes namespace created successfully",
+                    extra={
+                        "operation": "create_namespace",
+                        "namespace_name": namespace_name,
+                        "status": "created",
+                        "creation_timestamp": str(created_ns.metadata.creation_timestamp),
+                        "uid": created_ns.metadata.uid,
+                        "labels_applied": labels
+                    }
+                )
+                
+                return True
+                
+            finally:
+                # Clean up temporary file
+                if os.path.exists(temp_kubeconfig_path):
+                    os.unlink(temp_kubeconfig_path)
             
         except client.ApiException as e:
             self.logger.error(
@@ -463,25 +453,22 @@ class ProvisioningService:
                     "error_type": "k8s_api_error",
                     "error_status": e.status,
                     "error_reason": e.reason,
-                    "error_message": str(e),
-                    "error_body": e.body
+                    "error_message": str(e)
                 }
             )
             raise
         except Exception as e:
             self.logger.error(
-                "Unexpected error during namespace creation",
+                "Failed to create namespace using Azure SDK",
                 extra={
                     "operation": "create_namespace",
                     "namespace_name": namespace_name,
-                    "error_type": "unexpected_error",
+                    "error_type": "azure_sdk_error",
                     "error_class": type(e).__name__,
                     "error_message": str(e)
                 }
             )
             raise
-        else:
-            return True
 
     def provision_environment(self, branch_name: str) -> dict[str, Any]:
         """Main provisioning method.
