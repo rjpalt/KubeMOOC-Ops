@@ -3,4 +3,7 @@ azure-identity
 azure-mgmt-resource
 azure-mgmt-containerservice
 azure-mgmt-postgresql
+azure-mgmt-msi
 kubernetes
+pydantic
+psycopg2-binary

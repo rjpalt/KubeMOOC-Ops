@@ -1,0 +1,35 @@
+# Ignore project context and secrets
+.project/context.yaml
+
+# Azure Functions local settings
+**/local.settings.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.env
+*.venv
+venv/
+ENV/
+env/
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Azure Functions build artifacts
+**/bin/
+**/obj/
+**/.python_packages/
+**/.funcpack/
+
+# Logs
+*.log
+
+# Node modules (if any JS/TS in function)
+node_modules/

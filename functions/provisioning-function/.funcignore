@@ -1,0 +1,14 @@
+# Azure Functions ignore file
+.vscode/
+.venv/
+tests/
+local.settings.json
+*.pyc
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.env
+*.log
+
+# Old nested structure (being deprecated)
+ProvisionEnvironment/
