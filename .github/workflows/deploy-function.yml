@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Install uv
+      run: pipx install uv
+
     - name: Checkout code
       uses: actions/checkout@v4
 
