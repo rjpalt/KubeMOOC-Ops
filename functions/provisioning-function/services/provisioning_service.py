@@ -1,6 +1,7 @@
 """Provisioning service for managing Azure and Kubernetes resources."""
 
 import logging
+import time
 from typing import Any
 
 import psycopg2
@@ -88,10 +89,38 @@ class ProvisioningService:
         """
         if not self.settings.postgres_admin_password:
             msg = "POSTGRES_ADMIN_PASSWORD environment variable is required"
+            self.logger.error(
+                "PostgreSQL admin password not configured",
+                extra={
+                    "operation": "create_database",
+                    "database_name": database_name,
+                    "error_type": "missing_password"
+                }
+            )
             raise ValueError(msg)
+
+        self.logger.info(
+            "Starting database creation",
+            extra={
+                "operation": "create_database",
+                "database_name": database_name,
+                "postgres_host": self.settings.postgres_host,
+                "postgres_user": self.settings.postgres_admin_user
+            }
+        )
 
         try:
             # Connect to PostgreSQL server
+            self.logger.debug(
+                "Attempting PostgreSQL connection",
+                extra={
+                    "operation": "create_database",
+                    "database_name": database_name,
+                    "host": self.settings.postgres_host,
+                    "port": 5432
+                }
+            )
+            
             conn = psycopg2.connect(
                 host=self.settings.postgres_host,
                 port=5432,
@@ -101,18 +130,81 @@ class ProvisioningService:
             )
             conn.autocommit = True
 
+            self.logger.info(
+                "PostgreSQL connection established successfully",
+                extra={
+                    "operation": "create_database",
+                    "database_name": database_name
+                }
+            )
+
             with conn.cursor() as cursor:
                 # Sanitize database name for PostgreSQL (replace hyphens with underscores)
                 sanitized_name = database_name.replace("-", "_")
+                
+                self.logger.info(
+                    "Executing database creation command",
+                    extra={
+                        "operation": "create_database",
+                        "original_name": database_name,
+                        "sanitized_name": sanitized_name
+                    }
+                )
+                
                 cursor.execute(f'CREATE DATABASE "{sanitized_name}"')
-                self.logger.info("Database %s created successfully", sanitized_name)
+                self.logger.info(
+                    "Database created successfully",
+                    extra={
+                        "operation": "create_database",
+                        "database_name": sanitized_name,
+                        "status": "created"
+                    }
+                )
 
             conn.close()
+            self.logger.debug(
+                "PostgreSQL connection closed",
+                extra={
+                    "operation": "create_database",
+                    "database_name": database_name
+                }
+            )
+            
         except psycopg2.Error as e:
             if "already exists" in str(e):
-                self.logger.warning("Database %s already exists", database_name)
+                self.logger.warning(
+                    "Database already exists, continuing",
+                    extra={
+                        "operation": "create_database",
+                        "database_name": database_name,
+                        "status": "already_exists",
+                        "error_message": str(e)
+                    }
+                )
                 return True
-            self.logger.exception("Failed to create database %s", database_name)
+            
+            self.logger.error(
+                "Failed to create database",
+                extra={
+                    "operation": "create_database",
+                    "database_name": database_name,
+                    "error_type": "psycopg2_error",
+                    "error_message": str(e),
+                    "error_code": getattr(e, 'pgcode', None)
+                }
+            )
+            raise
+        except Exception as e:
+            self.logger.error(
+                "Unexpected error during database creation",
+                extra={
+                    "operation": "create_database",
+                    "database_name": database_name,
+                    "error_type": "unexpected_error",
+                    "error_class": type(e).__name__,
+                    "error_message": str(e)
+                }
+            )
             raise
         else:
             return True
@@ -158,30 +250,101 @@ class ProvisioningService:
             ValueError: If AKS cluster doesn't have OIDC issuer enabled
             Exception: If credential creation fails
         """
+        self.logger.info(
+            "Starting federated credential creation",
+            extra={
+                "operation": "create_federated_credential",
+                "branch_name": branch_name,
+                "managed_identity": self.settings.managed_identity_name,
+                "aks_cluster": self.settings.aks_cluster_name
+            }
+        )
+        
         try:
             # Get OIDC issuer URL from AKS cluster
+            self.logger.debug(
+                "Validating AKS OIDC configuration",
+                extra={
+                    "operation": "create_federated_credential",
+                    "branch_name": branch_name,
+                    "aks_cluster": self.settings.aks_cluster_name
+                }
+            )
+            
             issuer_url = self._validate_oidc_configuration(self.settings.aks_cluster_name)
+            
+            self.logger.info(
+                "AKS OIDC issuer URL retrieved",
+                extra={
+                    "operation": "create_federated_credential",
+                    "branch_name": branch_name,
+                    "issuer_url": issuer_url
+                }
+            )
 
             identity_client = self.get_identity_client()
             credential_name = f"cred-{branch_name}"
+            subject = f"system:serviceaccount:{branch_name}:default"
+
+            self.logger.info(
+                "Creating federated credential",
+                extra={
+                    "operation": "create_federated_credential",
+                    "branch_name": branch_name,
+                    "credential_name": credential_name,
+                    "subject": subject,
+                    "managed_identity_rg": self.settings.managed_identity_resource_group
+                }
+            )
 
             # Create federated credential
-            identity_client.federated_identity_credentials.create_or_update(
+            result = identity_client.federated_identity_credentials.create_or_update(
                 resource_group_name=self.settings.managed_identity_resource_group,
                 resource_name=self.settings.managed_identity_name,
                 federated_identity_credential_resource_name=credential_name,
                 parameters={
                     "properties": {
                         "issuer": issuer_url,
-                        "subject": f"system:serviceaccount:{branch_name}:default",
+                        "subject": subject,
                         "audiences": ["api://AzureADTokenExchange"],
                     },
                 },
             )
 
-            self.logger.info("Federated credential %s created successfully", credential_name)
-        except Exception:
-            self.logger.exception("Failed to create federated credential")
+            self.logger.info(
+                "Federated credential created successfully",
+                extra={
+                    "operation": "create_federated_credential",
+                    "branch_name": branch_name,
+                    "credential_name": credential_name,
+                    "credential_id": getattr(result, 'id', None),
+                    "status": "created"
+                }
+            )
+            
+        except ValueError as e:
+            self.logger.error(
+                "OIDC validation failed",
+                extra={
+                    "operation": "create_federated_credential",
+                    "branch_name": branch_name,
+                    "error_type": "oidc_validation_error",
+                    "error_message": str(e)
+                }
+            )
+            raise
+        except Exception as e:
+            self.logger.error(
+                "Failed to create federated credential",
+                extra={
+                    "operation": "create_federated_credential",
+                    "branch_name": branch_name,
+                    "credential_name": f"cred-{branch_name}",
+                    "error_type": "credential_creation_error",
+                    "error_class": type(e).__name__,
+                    "error_message": str(e)
+                }
+            )
             raise
         else:
             return True
@@ -198,34 +361,124 @@ class ProvisioningService:
         Raises:
             Exception: If namespace creation fails
         """
+        self.logger.info(
+            "Starting Kubernetes namespace creation",
+            extra={
+                "operation": "create_namespace",
+                "namespace_name": namespace_name,
+                "aks_cluster": self.settings.aks_cluster_name
+            }
+        )
+        
         try:
             k8s_client = self.get_kubernetes_client()
+            
+            self.logger.debug(
+                "Kubernetes client initialized",
+                extra={
+                    "operation": "create_namespace",
+                    "namespace_name": namespace_name
+                }
+            )
 
             # Check if namespace already exists
             try:
-                k8s_client.read_namespace(name=namespace_name)
-                self.logger.warning("Namespace %s already exists", namespace_name)
+                existing_ns = k8s_client.read_namespace(name=namespace_name)
+                self.logger.warning(
+                    "Namespace already exists",
+                    extra={
+                        "operation": "create_namespace",
+                        "namespace_name": namespace_name,
+                        "status": "already_exists",
+                        "creation_timestamp": str(existing_ns.metadata.creation_timestamp),
+                        "uid": existing_ns.metadata.uid
+                    }
+                )
+                return True
             except client.ApiException as e:
                 if e.status != HTTP_NOT_FOUND:
+                    self.logger.error(
+                        "Error checking namespace existence",
+                        extra={
+                            "operation": "create_namespace",
+                            "namespace_name": namespace_name,
+                            "error_type": "k8s_api_error",
+                            "error_status": e.status,
+                            "error_reason": e.reason,
+                            "error_message": str(e)
+                        }
+                    )
                     raise
-            else:
-                return True
+                
+                self.logger.debug(
+                    "Namespace does not exist, proceeding with creation",
+                    extra={
+                        "operation": "create_namespace",
+                        "namespace_name": namespace_name
+                    }
+                )
 
             # Create namespace
+            labels = {
+                "app.kubernetes.io/managed-by": "provisioning-function",
+                "provisioning.kubernetes.io/branch": namespace_name,
+            }
+            
+            self.logger.info(
+                "Creating namespace with labels",
+                extra={
+                    "operation": "create_namespace",
+                    "namespace_name": namespace_name,
+                    "labels": labels
+                }
+            )
+            
             namespace_manifest = client.V1Namespace(
                 metadata=client.V1ObjectMeta(
                     name=namespace_name,
-                    labels={
-                        "app.kubernetes.io/managed-by": "provisioning-function",
-                        "provisioning.kubernetes.io/branch": namespace_name,
-                    },
+                    labels=labels,
                 ),
             )
 
-            k8s_client.create_namespace(body=namespace_manifest)
-            self.logger.info("Namespace %s created successfully", namespace_name)
-        except Exception:
-            self.logger.exception("Failed to create namespace %s", namespace_name)
+            created_ns = k8s_client.create_namespace(body=namespace_manifest)
+            
+            self.logger.info(
+                "Kubernetes namespace created successfully",
+                extra={
+                    "operation": "create_namespace",
+                    "namespace_name": namespace_name,
+                    "status": "created",
+                    "creation_timestamp": str(created_ns.metadata.creation_timestamp),
+                    "uid": created_ns.metadata.uid,
+                    "labels_applied": labels
+                }
+            )
+            
+        except client.ApiException as e:
+            self.logger.error(
+                "Kubernetes API error during namespace creation",
+                extra={
+                    "operation": "create_namespace",
+                    "namespace_name": namespace_name,
+                    "error_type": "k8s_api_error",
+                    "error_status": e.status,
+                    "error_reason": e.reason,
+                    "error_message": str(e),
+                    "error_body": e.body
+                }
+            )
+            raise
+        except Exception as e:
+            self.logger.error(
+                "Unexpected error during namespace creation",
+                extra={
+                    "operation": "create_namespace",
+                    "namespace_name": namespace_name,
+                    "error_type": "unexpected_error",
+                    "error_class": type(e).__name__,
+                    "error_message": str(e)
+                }
+            )
             raise
         else:
             return True
@@ -242,17 +495,94 @@ class ProvisioningService:
         Raises:
             Exception: If any provisioning step fails
         """
+        operation_start_time = time.time()
+        self.logger.info(
+            "Starting environment provisioning workflow",
+            extra={
+                "operation": "provision_environment",
+                "branch_name": branch_name,
+                "subscription_id": self.settings.azure_subscription_id,
+                "postgres_server": self.settings.postgres_server_name,
+                "managed_identity": self.settings.managed_identity_name,
+                "aks_cluster": self.settings.aks_cluster_name
+            }
+        )
+        
         try:
             # Create database
+            self.logger.info(
+                "Step 1/3: Creating PostgreSQL database",
+                extra={
+                    "operation": "provision_environment",
+                    "branch_name": branch_name,
+                    "step": "database_creation"
+                }
+            )
+            database_start_time = time.time()
             database_created = self.create_database(branch_name)
+            database_duration = time.time() - database_start_time
+            
+            self.logger.info(
+                "Database creation completed",
+                extra={
+                    "operation": "provision_environment",
+                    "branch_name": branch_name,
+                    "step": "database_creation",
+                    "duration_seconds": round(database_duration, 2),
+                    "success": database_created
+                }
+            )
 
             # Create federated credential
+            self.logger.info(
+                "Step 2/3: Creating federated credential",
+                extra={
+                    "operation": "provision_environment",
+                    "branch_name": branch_name,
+                    "step": "credential_creation"
+                }
+            )
+            credential_start_time = time.time()
             credential_created = self.create_federated_credential(branch_name)
+            credential_duration = time.time() - credential_start_time
+            
+            self.logger.info(
+                "Credential creation completed",
+                extra={
+                    "operation": "provision_environment",
+                    "branch_name": branch_name,
+                    "step": "credential_creation",
+                    "duration_seconds": round(credential_duration, 2),
+                    "success": credential_created
+                }
+            )
 
             # Create Kubernetes namespace
+            self.logger.info(
+                "Step 3/3: Creating Kubernetes namespace",
+                extra={
+                    "operation": "provision_environment",
+                    "branch_name": branch_name,
+                    "step": "namespace_creation"
+                }
+            )
+            namespace_start_time = time.time()
             namespace_created = self.create_namespace(branch_name)
+            namespace_duration = time.time() - namespace_start_time
+            
+            self.logger.info(
+                "Namespace creation completed",
+                extra={
+                    "operation": "provision_environment",
+                    "branch_name": branch_name,
+                    "step": "namespace_creation",
+                    "duration_seconds": round(namespace_duration, 2),
+                    "success": namespace_created
+                }
+            )
 
             # Build result
+            total_duration = time.time() - operation_start_time
             result = {
                 "status": "success",
                 "branch_name": branch_name,
@@ -260,16 +590,49 @@ class ProvisioningService:
                 "credential_created": credential_created,
                 "namespace_created": namespace_created,
                 "message": f"Environment for branch '{branch_name}' provisioned successfully",
+                "timing": {
+                    "total_duration_seconds": round(total_duration, 2),
+                    "database_duration_seconds": round(database_duration, 2),
+                    "credential_duration_seconds": round(credential_duration, 2),
+                    "namespace_duration_seconds": round(namespace_duration, 2)
+                }
             }
 
-            self.logger.info("Provisioning completed successfully: %s", result)
+            self.logger.info(
+                "Environment provisioning completed successfully",
+                extra={
+                    "operation": "provision_environment",
+                    "branch_name": branch_name,
+                    "total_duration_seconds": round(total_duration, 2),
+                    "all_steps_successful": True,
+                    "result": result
+                }
+            )
+            
         except Exception as e:
+            total_duration = time.time() - operation_start_time
             error_msg = f"Provisioning failed for branch '{branch_name}': {e!s}"
-            self.logger.exception("%s", error_msg)
+            
+            self.logger.error(
+                "Environment provisioning failed",
+                extra={
+                    "operation": "provision_environment",
+                    "branch_name": branch_name,
+                    "total_duration_seconds": round(total_duration, 2),
+                    "error_type": "provisioning_failure",
+                    "error_class": type(e).__name__,
+                    "error_message": str(e),
+                    "all_steps_successful": False
+                }
+            )
+            
             return {
                 "status": "error",
                 "branch_name": branch_name,
                 "error": error_msg,
+                "timing": {
+                    "total_duration_seconds": round(total_duration, 2)
+                }
             }
         else:
             return result

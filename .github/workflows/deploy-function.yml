@@ -1,17 +1,24 @@
-# CI/CD workflow for Azure provisioning function
-name: Deploy Azure Provisioning Function
+name: Deploy Provisioning Function
+
 on:
   push:
+    branches:
+      - main
     paths:
-      - 'functions/provisioning-function/**'
-      - '.github/workflows/deploy-function.yml'
-  workflow_dispatch:
+      - 'functions/provisioning-function/**' # Only run when function code changes
+
 jobs:
-  build-and-deploy:
+  deploy:
+    name: Deploy Function to Azure
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      # Add build/test/deploy steps here as needed
-      - name: Placeholder for function deployment
-        run: echo "Implement Azure Function deployment here"
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to Azure Functions
+      uses: azure/functions-action@v1
+      with:
+        app-name: 'kubemooc-provisioning-func' # The name of your Function App in Azure
+        package: './functions/provisioning-function' # Path to your function code
+        publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
