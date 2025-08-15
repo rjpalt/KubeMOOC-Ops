@@ -2,6 +2,18 @@
   "IsEncrypted": false,
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
-    "FUNCTIONS_WORKER_RUNTIME": "python"
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_SUBSCRIPTION_ID": "ede18d8a-a758-4a40-b15e-6eded5264b93",
+    "POSTGRES_RESOURCE_GROUP": "kubemooc-postgres-feature",
+    "POSTGRES_SERVER_NAME": "kubemooc-postgres-feature",
+    "MANAGED_IDENTITY_RESOURCE_GROUP": "kubemooc-automation-rg",
+    "MANAGED_IDENTITY_NAME": "mi-todo-app-dev",
+    "MANAGED_IDENTITY_CLIENT_ID": "5acb9e8d-449f-4f46-9073-4b1d764d25e6",
+    "AKS_RESOURCE_GROUP": "kubernetes-learning",
+    "AKS_CLUSTER_NAME": "kube-mooc",
+    "POSTGRES_ADMIN_USER": "kubemoocadmin",
+    "POSTGRES_ADMIN_PASSWORD": "Possu-Passu2019!?",
+    "KEYVAULT_IDENTITY_NAME": "keyvault-identity-kube-mooc",
+    "KEYVAULT_IDENTITY_RESOURCE_GROUP": "kubernetes-learning"
   }
 }

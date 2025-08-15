@@ -26,7 +26,7 @@ class ProvisioningService:
         self.logger = logging.getLogger(__name__)
         # Use the specific user-assigned managed identity for this function
         self.credential = DefaultAzureCredential(
-            managed_identity_client_id=settings.managed_identity_client_id
+            managed_identity_client_id=settings.provisioning_function_client_id
         )
 
     def get_postgres_client(self) -> PostgreSQLManagementClient:
@@ -219,24 +219,25 @@ class ProvisioningService:
         return cluster.oidc_issuer_profile.issuer_url
 
     def create_federated_credential(self, branch_name: str) -> bool:
-        """Create federated credential for the managed identity.
+        """Create federated credentials for both database and keyvault access.
 
         Args:
             branch_name: Name of the branch to create credential for
 
         Returns:
-            True if credential was created successfully
+            True if credentials were created successfully
 
         Raises:
             ValueError: If AKS cluster doesn't have OIDC issuer enabled
             Exception: If credential creation fails
         """
         self.logger.info(
-            "Starting federated credential creation",
+            "Starting federated credential creation for both database and keyvault access",
             extra={
                 "operation": "create_federated_credential",
                 "branch_name": branch_name,
-                "managed_identity": self.settings.managed_identity_name,
+                "database_identity": self.settings.database_identity_name,
+                "keyvault_identity": self.settings.keyvault_identity_name,
                 "aks_cluster": self.settings.aks_cluster_name
             }
         )
@@ -264,27 +265,29 @@ class ProvisioningService:
             )
 
             identity_client = self.get_identity_client()
-            credential_name = f"postgres-workload-identity-{branch_name}"
             namespace_name = f"feature-{branch_name}"
             subject = f"system:serviceaccount:{namespace_name}:postgres-service-account"
 
+            # 1. Create federated credential for database access (mi-todo-app-dev)
+            database_credential_name = f"database-workload-identity-{branch_name}"
+            
             self.logger.info(
-                "Creating federated credential",
+                "Creating federated credential for database access",
                 extra={
                     "operation": "create_federated_credential",
                     "branch_name": branch_name,
-                    "credential_name": credential_name,
+                    "credential_name": database_credential_name,
                     "subject": subject,
                     "namespace_name": namespace_name,
-                    "managed_identity_rg": self.settings.managed_identity_resource_group
+                    "database_identity": self.settings.database_identity_name,
+                    "database_identity_rg": self.settings.database_identity_resource_group
                 }
             )
 
-            # Create federated credential
-            result = identity_client.federated_identity_credentials.create_or_update(
-                resource_group_name=self.settings.managed_identity_resource_group,
-                resource_name=self.settings.managed_identity_name,
-                federated_identity_credential_resource_name=credential_name,
+            database_result = identity_client.federated_identity_credentials.create_or_update(
+                resource_group_name=self.settings.database_identity_resource_group,
+                resource_name=self.settings.database_identity_name,
+                federated_identity_credential_resource_name=database_credential_name,
                 parameters={
                     "properties": {
                         "issuer": issuer_url,
@@ -295,27 +298,29 @@ class ProvisioningService:
             )
 
             self.logger.info(
-                "Federated credential created successfully for main identity",
+                "Federated credential created successfully for database access",
                 extra={
                     "operation": "create_federated_credential",
                     "branch_name": branch_name,
-                    "credential_name": credential_name,
-                    "credential_id": getattr(result, 'id', None),
-                    "identity": self.settings.managed_identity_name,
+                    "credential_name": database_credential_name,
+                    "credential_id": getattr(database_result, 'id', None),
+                    "identity": self.settings.database_identity_name,
+                    "purpose": "database_access",
                     "status": "created"
                 }
             )
 
-            # Also create federated credential for keyvault identity (used by pods)
-            keyvault_credential_name = f"postgres-workload-identity-{branch_name}"
+            # 2. Create federated credential for keyvault access 
+            keyvault_credential_name = f"keyvault-workload-identity-{branch_name}"
             
             self.logger.info(
-                "Creating federated credential for keyvault identity",
+                "Creating federated credential for keyvault access",
                 extra={
                     "operation": "create_federated_credential",
                     "branch_name": branch_name,
                     "credential_name": keyvault_credential_name,
                     "subject": subject,
+                    "namespace_name": namespace_name,
                     "keyvault_identity": self.settings.keyvault_identity_name,
                     "keyvault_identity_rg": self.settings.keyvault_identity_resource_group
                 }
@@ -335,13 +340,14 @@ class ProvisioningService:
             )
 
             self.logger.info(
-                "Federated credential created successfully for keyvault identity",
+                "Federated credential created successfully for keyvault access",
                 extra={
                     "operation": "create_federated_credential",
                     "branch_name": branch_name,
                     "credential_name": keyvault_credential_name,
                     "credential_id": getattr(keyvault_result, 'id', None),
                     "identity": self.settings.keyvault_identity_name,
+                    "purpose": "keyvault_access",
                     "status": "created"
                 }
             )
@@ -536,7 +542,8 @@ class ProvisioningService:
                 "branch_name": branch_name,
                 "subscription_id": self.settings.azure_subscription_id,
                 "postgres_server": self.settings.postgres_server_name,
-                "managed_identity": self.settings.managed_identity_name,
+                "database_identity": self.settings.database_identity_name,
+                "keyvault_identity": self.settings.keyvault_identity_name,
                 "aks_cluster": self.settings.aks_cluster_name
             }
         )
@@ -568,7 +575,7 @@ class ProvisioningService:
 
             # Create federated credential
             self.logger.info(
-                "Step 2/3: Creating federated credential",
+                "Step 2/3: Creating federated credentials for database and keyvault access",
                 extra={
                     "operation": "provision_environment",
                     "branch_name": branch_name,
