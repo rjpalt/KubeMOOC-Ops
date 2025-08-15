@@ -1,0 +1,68 @@
+[project]
+name = "deployment-function"
+version = "0.1.0"
+description = "Azure Function for automated deployment of feature branch environments to AKS"
+requires-python = ">=3.12"
+dependencies = [
+    "azure-functions",
+    "azure-identity",
+    "azure-mgmt-containerregistry",
+    "azure-mgmt-containerservice",
+    "kubernetes",
+    "pydantic",
+    "pydantic-settings",
+    "requests",
+    "PyYAML",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "mypy",
+    "types-requests",
+    "types-PyYAML",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "C", "I", "N", "D", "UP", "ANN", "S", "B", "A", "DTZ", "EM", "G", "INP", "PIE", "T20", "PYI", "PT", "Q", "RSE", "RET", "SIM", "TCH", "ARG", "PTH", "ERA", "PD", "PGH", "PL", "TRY", "NPY", "RUF"]
+ignore = [
+    "D100", "D101", "D102", "D103", "D104", "D105", # Missing docstrings
+    "ANN001", "ANN201", # Missing type annotations in tests
+    "S101", # Use of assert in tests
+    "G004", # Logging with f-strings
+    "ARG001", "ARG002", # Unused arguments (common in Azure Functions and mocks)
+    "TRY400", # Use logging.exception (prefer explicit error messages)
+    "RET504", # Unnecessary assignment before return (for clarity)
+    "COM812", # Trailing comma (conflicts with formatter)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

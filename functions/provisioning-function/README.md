@@ -47,7 +47,9 @@ functions/provisioning-function/
 The provisioning function handles three core operations for feature branch environments:
 
 1. **PostgreSQL Database Creation**: Creates isolated databases on existing PostgreSQL Flexible Server
-2. **Federated Credential Management**: Sets up OIDC-based authentication for managed identities
+2. **Dual Federated Credential Management**: Sets up OIDC-based authentication for both database and Key Vault access
+   - **Database Access**: Creates federated credential on `mi-todo-app-dev` for PostgreSQL connectivity
+   - **Key Vault Access**: Creates federated credential on `keyvault-identity-kube-mooc` for secret management
 3. **Kubernetes Namespace Creation**: Creates labeled namespaces for workload isolation
 
 ### API Contract
@@ -103,8 +105,14 @@ Environment-based configuration using Pydantic Settings:
 | `POSTGRES_SERVER_NAME` | **Yes** | PostgreSQL server name |
 | `POSTGRES_ADMIN_USER` | **Yes** | PostgreSQL admin username |
 | `POSTGRES_ADMIN_PASSWORD` | **Yes** | PostgreSQL admin password |
-| `MANAGED_IDENTITY_RESOURCE_GROUP` | **Yes** | Managed identity resource group |
-| `MANAGED_IDENTITY_NAME` | **Yes** | Managed identity name |
+| `PROVISIONING_FUNCTION_IDENTITY_NAME` | **Yes** | Provisioning function managed identity name |
+| `PROVISIONING_FUNCTION_CLIENT_ID` | **Yes** | Provisioning function managed identity client ID |
+| `DATABASE_IDENTITY_NAME` | **Yes** | Database access managed identity name |
+| `DATABASE_IDENTITY_CLIENT_ID` | **Yes** | Database access managed identity client ID |
+| `DATABASE_IDENTITY_RESOURCE_GROUP` | **Yes** | Database identity resource group |
+| `KEYVAULT_IDENTITY_NAME` | **Yes** | Key Vault access managed identity name |
+| `KEYVAULT_IDENTITY_CLIENT_ID` | **Yes** | Key Vault access managed identity client ID |
+| `KEYVAULT_IDENTITY_RESOURCE_GROUP` | **Yes** | Key Vault identity resource group |
 | `AKS_RESOURCE_GROUP` | **Yes** | AKS cluster resource group |
 | `AKS_CLUSTER_NAME` | **Yes** | AKS cluster name |
 
@@ -122,12 +130,26 @@ Environment-based configuration using Pydantic Settings:
    AZURE_SUBSCRIPTION_ID=your-subscription-id-here
    POSTGRES_RESOURCE_GROUP=your-postgres-resource-group
    POSTGRES_SERVER_NAME=your-postgres-server-name
-   MANAGED_IDENTITY_RESOURCE_GROUP=your-identity-resource-group
-   MANAGED_IDENTITY_NAME=your-managed-identity-name
-   AKS_RESOURCE_GROUP=your-aks-resource-group
-   AKS_CLUSTER_NAME=your-aks-cluster-name
    POSTGRES_ADMIN_USER=postgres
    POSTGRES_ADMIN_PASSWORD=your-secure-password
+   
+   # Provisioning Function Identity (authenticates this function)
+   PROVISIONING_FUNCTION_IDENTITY_NAME=your-provisioning-function-identity
+   PROVISIONING_FUNCTION_CLIENT_ID=your-provisioning-function-client-id
+   
+   # Database Access Identity (used by pods for PostgreSQL)
+   DATABASE_IDENTITY_NAME=your-database-access-identity
+   DATABASE_IDENTITY_CLIENT_ID=your-database-access-client-id
+   DATABASE_IDENTITY_RESOURCE_GROUP=your-database-identity-resource-group
+   
+   # Key Vault Access Identity (used by pods for Key Vault)
+   KEYVAULT_IDENTITY_NAME=your-keyvault-access-identity
+   KEYVAULT_IDENTITY_CLIENT_ID=your-keyvault-access-client-id
+   KEYVAULT_IDENTITY_RESOURCE_GROUP=your-keyvault-identity-resource-group
+   
+   # Kubernetes Configuration
+   AKS_RESOURCE_GROUP=your-aks-resource-group
+   AKS_CLUSTER_NAME=your-aks-cluster-name
    ```
 
 ## Development Setup
@@ -285,11 +307,12 @@ uv run func start
 
 The function has been deployed to Azure Function App with managed identity authentication.
 
-**Deployment Status**: ✅ **DEPLOYED** (August 14, 2025)
+**Deployment Status**: ✅ **DEPLOYED** (August 15, 2025)
 - **Function App**: `kubemooc-provisioning-func`
 - **Endpoint**: `https://kubemooc-provisioning-func-cmgzbegwhghddtby.northeurope-01.azurewebsites.net/api/provision`
 - **Authentication**: User-assigned managed identity (`mi-provisioning-function`)
 - **Environment**: All required variables configured in Azure Portal
+- **Federation**: Dual identity setup for database and Key Vault access
 
 #### Deployment Command
 ```bash
@@ -304,9 +327,14 @@ The following environment variables are configured in the Azure Function App:
 - `POSTGRES_SERVER_NAME`
 - `POSTGRES_ADMIN_USER`
 - `POSTGRES_ADMIN_PASSWORD`
-- `MANAGED_IDENTITY_RESOURCE_GROUP`
-- `MANAGED_IDENTITY_NAME`
-- `MANAGED_IDENTITY_CLIENT_ID` ⭐ **NEW** - Required for user-assigned managed identity
+- `PROVISIONING_FUNCTION_IDENTITY_NAME` - Provisioning function managed identity
+- `PROVISIONING_FUNCTION_CLIENT_ID` - Required for user-assigned managed identity authentication
+- `DATABASE_IDENTITY_NAME` - Database access managed identity
+- `DATABASE_IDENTITY_CLIENT_ID` - Database access client ID
+- `DATABASE_IDENTITY_RESOURCE_GROUP` - Database identity resource group
+- `KEYVAULT_IDENTITY_NAME` - Key Vault access managed identity
+- `KEYVAULT_IDENTITY_CLIENT_ID` - Key Vault access client ID
+- `KEYVAULT_IDENTITY_RESOURCE_GROUP` - Key Vault identity resource group
 - `AKS_RESOURCE_GROUP`
 - `AKS_CLUSTER_NAME`
 
@@ -331,14 +359,21 @@ curl -X POST -i \
   "namespace_created": true,
   "message": "Environment for branch 'test-feature-123' provisioned successfully",
   "timing": {
-    "total_duration_seconds": 2.45,
-    "database_duration_seconds": 0.82,
-    "credential_duration_seconds": 1.21,
-    "namespace_duration_seconds": 0.42
+    "total_duration_seconds": 8.49,
+    "database_duration_seconds": 0.05,
+    "credential_duration_seconds": 6.85,
+    "namespace_duration_seconds": 1.59
   },
   "correlation_id": "uuid-here"
 }
 ```
+
+**What gets created**:
+- **Database**: `test_feature_123` (sanitized name with underscores)
+- **Namespace**: `feature-test-feature-123` with `dev-gateway-access=allowed` label
+- **Database Federation**: `database-workload-identity-test-feature-123` on `mi-todo-app-dev`
+- **Key Vault Federation**: `keyvault-workload-identity-test-feature-123` on `keyvault-identity-kube-mooc`
+- **OIDC Subject**: `system:serviceaccount:feature-test-feature-123:postgres-service-account`
 
 #### Function Key Retrieval
 ```bash

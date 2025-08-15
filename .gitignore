@@ -31,5 +31,8 @@ Thumbs.db
 # Logs
 *.log
 
+# Implementation planning docs (should not be tracked)
+*IMPLEMENTATION_PLAN.md
+
 # Node modules (if any JS/TS in function)
 node_modules/
