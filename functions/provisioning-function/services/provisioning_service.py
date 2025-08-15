@@ -295,12 +295,53 @@ class ProvisioningService:
             )
 
             self.logger.info(
-                "Federated credential created successfully",
+                "Federated credential created successfully for main identity",
                 extra={
                     "operation": "create_federated_credential",
                     "branch_name": branch_name,
                     "credential_name": credential_name,
                     "credential_id": getattr(result, 'id', None),
+                    "identity": self.settings.managed_identity_name,
+                    "status": "created"
+                }
+            )
+
+            # Also create federated credential for keyvault identity (used by pods)
+            keyvault_credential_name = f"postgres-workload-identity-{branch_name}"
+            
+            self.logger.info(
+                "Creating federated credential for keyvault identity",
+                extra={
+                    "operation": "create_federated_credential",
+                    "branch_name": branch_name,
+                    "credential_name": keyvault_credential_name,
+                    "subject": subject,
+                    "keyvault_identity": self.settings.keyvault_identity_name,
+                    "keyvault_identity_rg": self.settings.keyvault_identity_resource_group
+                }
+            )
+
+            keyvault_result = identity_client.federated_identity_credentials.create_or_update(
+                resource_group_name=self.settings.keyvault_identity_resource_group,
+                resource_name=self.settings.keyvault_identity_name,
+                federated_identity_credential_resource_name=keyvault_credential_name,
+                parameters={
+                    "properties": {
+                        "issuer": issuer_url,
+                        "subject": subject,
+                        "audiences": ["api://AzureADTokenExchange"],
+                    },
+                },
+            )
+
+            self.logger.info(
+                "Federated credential created successfully for keyvault identity",
+                extra={
+                    "operation": "create_federated_credential",
+                    "branch_name": branch_name,
+                    "credential_name": keyvault_credential_name,
+                    "credential_id": getattr(keyvault_result, 'id', None),
+                    "identity": self.settings.keyvault_identity_name,
                     "status": "created"
                 }
             )

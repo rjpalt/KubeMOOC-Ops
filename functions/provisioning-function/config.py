@@ -26,6 +26,10 @@ class Settings(BaseSettings):
     postgres_admin_user: str
     postgres_admin_password: str
 
+    # Keyvault Identity Configuration (used by pods for Key Vault access)
+    keyvault_identity_name: str
+    keyvault_identity_resource_group: str
+
     # Computed properties
     @property
     def postgres_host(self) -> str:
