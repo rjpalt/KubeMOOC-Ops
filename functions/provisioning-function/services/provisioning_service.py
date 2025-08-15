@@ -264,8 +264,9 @@ class ProvisioningService:
             )
 
             identity_client = self.get_identity_client()
-            credential_name = f"cred-{branch_name}"
-            subject = f"system:serviceaccount:{branch_name}:default"
+            credential_name = f"postgres-workload-identity-{branch_name}"
+            namespace_name = f"feature-{branch_name}"
+            subject = f"system:serviceaccount:{namespace_name}:postgres-service-account"
 
             self.logger.info(
                 "Creating federated credential",
@@ -274,6 +275,7 @@ class ProvisioningService:
                     "branch_name": branch_name,
                     "credential_name": credential_name,
                     "subject": subject,
+                    "namespace_name": namespace_name,
                     "managed_identity_rg": self.settings.managed_identity_resource_group
                 }
             )
@@ -320,7 +322,7 @@ class ProvisioningService:
                 extra={
                     "operation": "create_federated_credential",
                     "branch_name": branch_name,
-                    "credential_name": f"cred-{branch_name}",
+                    "credential_name": f"postgres-workload-identity-{branch_name}",
                     "error_type": "credential_creation_error",
                     "error_class": type(e).__name__,
                     "error_message": str(e)
@@ -330,7 +332,7 @@ class ProvisioningService:
         else:
             return True
 
-    def create_namespace(self, namespace_name: str) -> bool:
+    def create_namespace(self, namespace_name: str, branch_name: str | None = None) -> bool:
         """Create Kubernetes namespace using Azure SDK and Kubernetes client.
 
         Args:
@@ -410,9 +412,12 @@ class ProvisioningService:
                 # Create namespace with labels
                 labels = {
                     "app.kubernetes.io/managed-by": "provisioning-function",
-                    "provisioning.kubernetes.io/branch": namespace_name,
                     "dev-gateway-access": "allowed",  # Required for AGC gateway access
                 }
+                
+                # Add branch label if branch_name is provided
+                if branch_name:
+                    labels["provisioning.kubernetes.io/branch"] = branch_name
                 
                 self.logger.info(f"Creating namespace: {namespace_name} with labels: {labels}")
                 
@@ -554,7 +559,7 @@ class ProvisioningService:
                 }
             )
             namespace_start_time = time.time()
-            namespace_created = self.create_namespace(branch_name)
+            namespace_created = self.create_namespace(f"feature-{branch_name}", branch_name)
             namespace_duration = time.time() - namespace_start_time
             
             self.logger.info(
