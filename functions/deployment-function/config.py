@@ -19,13 +19,13 @@ class Settings(BaseSettings):
     # Azure Kubernetes Service settings
     aks_cluster_name: str = "kube-mooc"
     aks_resource_group: str = "kubernetes-learning"
-    azure_subscription_id: str = "ede18d8a-a758-4a40-b15e-6eded5264b93"
+    azure_subscription_id: str  # No default - must be provided via environment
 
     # GitHub repository settings
     github_repository_url: str = "https://github.com/rjpalt/KubernetesMOOC"
 
     # Azure Functions settings
-    azure_client_id: str = "7d02038e-70a7-4666-833c-e00de5e103d1"  # Managed identity client ID
+    azure_client_id: str  # No default - must be provided via environment
 
 
 # Global settings instance

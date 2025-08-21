@@ -1,0 +1,16 @@
+# Azure Functions ignore file
+.git*
+.vscode
+local.settings.json
+test
+.env
+.env.*
+!.env.example
+.ruff_cache
+.pytest_cache
+__pycache__
+*.pyc
+.python_packages
+.mypy_cache
+*.log
+.DS_Store

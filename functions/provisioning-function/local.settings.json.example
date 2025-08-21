@@ -1,0 +1,19 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_SUBSCRIPTION_ID": "your-subscription-id-here",
+    "POSTGRES_RESOURCE_GROUP": "your-postgres-resource-group",
+    "POSTGRES_SERVER_NAME": "your-postgres-server-name",
+    "MANAGED_IDENTITY_RESOURCE_GROUP": "your-managed-identity-resource-group",
+    "MANAGED_IDENTITY_NAME": "your-managed-identity-name",
+    "MANAGED_IDENTITY_CLIENT_ID": "your-managed-identity-client-id",
+    "AKS_RESOURCE_GROUP": "your-aks-resource-group",
+    "AKS_CLUSTER_NAME": "your-aks-cluster-name",
+    "POSTGRES_ADMIN_USER": "your-postgres-admin-user",
+    "POSTGRES_ADMIN_PASSWORD": "your-postgres-admin-password",
+    "KEYVAULT_IDENTITY_NAME": "your-keyvault-identity-name",
+    "KEYVAULT_IDENTITY_RESOURCE_GROUP": "your-keyvault-identity-resource-group"
+  }
+}

@@ -33,6 +33,7 @@ Thumbs.db
 
 # Implementation planning docs (should not be tracked)
 *IMPLEMENTATION_PLAN.md
+*AZURE_MEMOS.md
 
 # Node modules (if any JS/TS in function)
 node_modules/
