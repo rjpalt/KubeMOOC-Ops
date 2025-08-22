@@ -74,128 +74,49 @@ The deprovisioning function reverses three core operations from feature branch e
 **Response** (Success):
 ```json
 {
-
-  ## Overview
-
-  This function reverses all operations performed by the provisioning function, ensuring complete cleanup of feature branch environments when branches are deleted.
-
-  ## Architecture & Azure Infrastructure
-
-  ### Azure Function (`functions/deprovisioning-function/`)
-
-  Modern Python-based Azure Function using:
-  - **uv** for dependency management and virtual environments
-  - **ruff** for code quality and formatting
-  - **pytest** for comprehensive testing
-  - **pydantic-settings** for configuration management
-  - **Azure SDK** for cloud resource management
-
-  ### Project Structure
-
-  ```
-  functions/deprovisioning-function/
-  ├── function_app.py               # Azure Function entry point (modern v2 model)
-  ├── config.py                     # Environment-based settings (no defaults)
-  ├── models/                       # Request/response models
-  │   ├── __init__.py              # Empty (proper Azure Function structure)
-  │   └── requests.py              # Pydantic validation models
-  ├── services/                     # Business logic
-  │   ├── __init__.py              # Empty (proper Azure Function structure)
-  │   └── deprovisioning_service.py # Core deprovisioning logic
-  ├── tests/                        # Test suite
-  │   ├── test_config.py           # Configuration tests (mock values only)
-  │   ├── test_models.py           # Model validation tests
-  │   └── test_deprovisioning_service.py # Service logic tests
-  ├── .env                         # Environment variables (gitignored)
-  ├── .env.example                 # Environment template
-  ├── .funcignore                  # Deployment exclusions
-  ├── pyproject.toml               # Project configuration
-  ├── host.json                    # Azure Function runtime config
-  ├── local.settings.json          # Local development settings
-  ├── requirements.txt             # Python dependencies
-  └── uv.lock                      # Dependency lock file
-  ```
-
-  ### Azure Infrastructure Setup
-
-  #### Managed Identity
-  - **Name**: `mi-deprovisioning-function`
-  - **Resource Group**: `kubemooc-automation-rg`
-  - **Location**: `northeurope`
-  - **Client ID**: `[REDACTED - Check Azure Portal]`
-  - **Principal ID**: `[REDACTED - Check Azure Portal]`
-
-  #### RBAC Permissions Assigned
-  The managed identity is granted least-privilege access for all required operations:
-
-  1. **PostgreSQL Database Deletion**
-    - Role: `Contributor`
-    - Scope: `/subscriptions/ede18d8a-a758-4a40-b15e-6eded5264b93/resourceGroups/kubernetes-learning/providers/Microsoft.DBforPostgreSQL/flexibleServers/kubemooc-postgres-feature`
-
-  2. **Federated Credential Cleanup**
-    - Role: `Managed Identity Contributor`
-    - Scope: `/subscriptions/ede18d8a-a758-4a40-b15e-6eded5264b93/resourceGroups/kubemooc-automation-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-todo-app-dev`
-    - Scope: `/subscriptions/ede18d8a-a758-4a40-b15e-6eded5264b93/resourceGroups/kubernetes-learning/providers/Microsoft.ManagedIdentity/userAssignedIdentities/keyvault-identity-kube-mooc`
-    - Scope: `/subscriptions/ede18d8a-a758-4a40-b15e-6eded5264b93/resourceGroups/kubemooc-automation-rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-deprovisioning-function`
-
-  3. **AKS Namespace and Resource Management**
-    - Role: `Azure Kubernetes Service RBAC Writer`
-    - Scope: `/subscriptions/ede18d8a-a758-4a40-b15e-6eded5264b93/resourcegroups/kubernetes-learning/providers/Microsoft.ContainerService/managedClusters/kube-mooc`
-
-  #### Kubernetes RBAC Configuration
-  **Applied**: August 19, 2025 ✅
-  
-  Additional cluster-level RBAC provides fine-grained namespace deletion control:
-  
-  - **ClusterRole**: `namespace-manager`
-    - **Namespace Operations**: delete, get, list
-    - **CronJob Management**: get, list, patch (for suspension before deletion)
-    - **Resource Inspection**: get, list pods, services, configmaps, secrets
-  
-  - **ClusterRoleBinding**: `deprovisioning-function-binding`
-    - **Subject**: `41ed2068-1c66-4911-9345-1b413cb9a21c` (mi-deprovisioning-function principal ID)
-    - **Security**: Only the deprovisioning function can delete namespaces via Kubernetes API
-  
-  **Manifest Location**: `/cluster-manifests/cluster-protection-rbac.yaml`
-  
-  ```bash
-  # Applied with:
-  kubectl apply -f cluster-manifests/cluster-protection-rbac.yaml
-  # Output:
-  # clusterrole.rbac.authorization.k8s.io/namespace-manager created
-  # clusterrolebinding.rbac.authorization.k8s.io/deprovisioning-function-binding created
-  ```
-
-  #### Rationale for Choices
-  - **Independent managed identity**: Ensures separation of duties and least-privilege principle
-  - **Explicit RBAC assignments**: Only the required scopes and roles are granted
-  - **Consistent resource group and location**: Matches existing automation and AKS infrastructure
-
-  #### Command History (for reproducibility)
-  ```bash
-  # Managed identity creation
-  az identity create \
-      "error": "Federated credential 'keyvault-workload-identity-ex-c3-e11' not found",
-      "severity": "warning"
+  "status": "success",
+  "branch_name": "ex-c3-e11",
+  "operations": {
+    "database_deleted": true,
+    "database_name": "ex_c3_e11",
+    "credentials_deleted": {
+      "database_credential": true,
+      "keyvault_credential": true
     },
-
-  # PostgreSQL Contributor role
-  az role assignment create \
-    {
-      "operation": "database_deletion", 
-      "error": "Connection timeout to PostgreSQL server",
-
-  # Managed Identity Contributor roles
-  az role assignment create \
-      "severity": "critical"
-    }
-  ],
-  az role assignment create \
-  "correlation_id": "deprov-ex-c3-e11-20250819-143052",
-  "message": "Deprovisioning completed with errors"
+    "namespace_deleted": true,
+    "namespace_name": "feature-ex-c3-e11",
+    "cronjobs_suspended": 0
+  },
+  "timing": {
+    "namespace_duration_seconds": 0.0,
+    "credentials_duration_seconds": 0.0,
+    "database_duration_seconds": 0.0,
+    "total_duration_seconds": 0.0
+  },
+  "message": "Environment for branch 'ex-c3-e11' deprovisioned successfully"
 }
-  az role assignment create \
 ```
+
+## Azure permissions (least privilege)
+
+Required roles for `mi-deprovisioning-function`:
+
+- PostgreSQL Flexible Server (server scope)
+  - Role: Contributor
+  - Scope: kubemooc-postgres-feature
+
+- Managed Identity targets (identity resource scope)
+  - Role: Managed Identity Contributor
+  - Scopes: mi-todo-app-dev, keyvault-identity-kube-mooc
+
+- AKS cluster (cluster resource scope)
+  - Role: Azure Kubernetes Service Cluster User Role
+  - Role: Azure Kubernetes Service RBAC Writer
+  - Scope: kube-mooc
+
+Notes:
+- Function uses AKS user credentials (not admin) via Azure SDK.
+- Kubernetes API permissions are granted by AKS RBAC Writer; no in-cluster RBAC manifests are required.
 
 ### Validation Rules
 
