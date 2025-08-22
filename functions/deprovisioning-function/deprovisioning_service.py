@@ -89,17 +89,23 @@ class DeprovisioningService:
                 "operation": "delete_database",
                 "original_name": database_name,
                 "sanitized_name": sanitized_name,
+                "postgres_host": self.settings.postgres_host,
+                "postgres_user": self.settings.postgres_admin_user,
             },
         )
 
         try:
-            # Connect to PostgreSQL server
-            self.logger.debug(
-                "Attempting PostgreSQL connection",
+            # Connect to PostgreSQL server with timeout
+            self.logger.info(
+                "Attempting PostgreSQL connection with connection details",
                 extra={
                     "correlation_id": self.correlation_id,
                     "operation": "delete_database",
                     "database_name": sanitized_name,
+                    "host": self.settings.postgres_host,
+                    "port": 5432,
+                    "user": self.settings.postgres_admin_user,
+                    "target_database": "postgres",
                 },
             )
 
@@ -123,11 +129,31 @@ class DeprovisioningService:
 
             with conn.cursor() as cursor:
                 # Check if database exists first
+                self.logger.info(
+                    "Checking if database exists",
+                    extra={
+                        "correlation_id": self.correlation_id,
+                        "operation": "delete_database",
+                        "database_name": sanitized_name,
+                        "query": "SELECT 1 FROM pg_database WHERE datname = %s",
+                    },
+                )
+
                 cursor.execute(
                     "SELECT 1 FROM pg_database WHERE datname = %s",
                     (sanitized_name,),
                 )
                 exists = cursor.fetchone()
+
+                self.logger.info(
+                    f"Database existence check completed",
+                    extra={
+                        "correlation_id": self.correlation_id,
+                        "operation": "delete_database",
+                        "database_name": sanitized_name,
+                        "exists": bool(exists),
+                    },
+                )
 
                 if not exists:
                     self.logger.warning(
@@ -150,11 +176,34 @@ class DeprovisioningService:
                         },
                     )
 
-                    cursor.execute("""
+                    terminate_query = """
                         SELECT pg_terminate_backend(pid)
                         FROM pg_stat_activity
                         WHERE datname = %s AND pid <> pg_backend_pid()
-                    """, (sanitized_name,))
+                    """
+                    
+                    self.logger.info(
+                        "Executing connection termination query",
+                        extra={
+                            "correlation_id": self.correlation_id,
+                            "operation": "delete_database",
+                            "database_name": sanitized_name,
+                            "query": "pg_terminate_backend for active connections",
+                        },
+                    )
+
+                    cursor.execute(terminate_query, (sanitized_name,))
+                    terminated_count = cursor.rowcount
+                    
+                    self.logger.info(
+                        f"Terminated {terminated_count} active connections",
+                        extra={
+                            "correlation_id": self.correlation_id,
+                            "operation": "delete_database",
+                            "database_name": sanitized_name,
+                            "terminated_connections": terminated_count,
+                        },
+                    )
 
                     # Drop the database
                     self.logger.info(
@@ -163,10 +212,13 @@ class DeprovisioningService:
                             "correlation_id": self.correlation_id,
                             "operation": "delete_database",
                             "database_name": sanitized_name,
+                            "command": f'DROP DATABASE "{sanitized_name}"',
                         },
                     )
 
-                    cursor.execute(f'DROP DATABASE "{sanitized_name}"')
+                    drop_query = f'DROP DATABASE "{sanitized_name}"'
+                    cursor.execute(drop_query)
+                    
                     self.logger.info(
                         "Database deleted successfully",
                         extra={
@@ -177,9 +229,17 @@ class DeprovisioningService:
                         },
                     )
 
+            self.logger.info(
+                "Closing PostgreSQL connection",
+                extra={
+                    "correlation_id": self.correlation_id,
+                    "operation": "delete_database",
+                    "database_name": sanitized_name,
+                },
+            )
             conn.close()
-            self.logger.debug(
-                "PostgreSQL connection closed",
+            self.logger.info(
+                "PostgreSQL connection closed successfully",
                 extra={
                     "correlation_id": self.correlation_id,
                     "operation": "delete_database",
@@ -205,7 +265,15 @@ class DeprovisioningService:
                     "error_type": "psycopg2_error",
                     "error_message": str(e),
                     "error_code": getattr(e, "pgcode", None),
+                    "error_severity": getattr(e, "severity", None),
+                    "error_diag_message": getattr(e.diag, "message_primary", None) if hasattr(e, "diag") and e.diag else None,
                     "duration_seconds": round(operation_duration, 2),
+                    "connection_info": {
+                        "host": self.settings.postgres_host,
+                        "port": 5432,
+                        "user": self.settings.postgres_admin_user,
+                        "database": "postgres",
+                    },
                 },
             )
             raise
@@ -516,7 +584,7 @@ class DeprovisioningService:
             )
 
         self.logger.info(
-            "Starting Kubernetes namespace deletion using Azure SDK",
+            "Starting Kubernetes namespace deletion (AKS user credentials)",
             extra={
                 "correlation_id": self.correlation_id,
                 "operation": "delete_namespace",
@@ -532,8 +600,8 @@ class DeprovisioningService:
                 self.settings.azure_subscription_id,
             )
 
-            # Get cluster admin credentials
-            credential_results = container_client.managed_clusters.list_cluster_admin_credentials(
+            # Get cluster user credentials (least privilege)
+            credential_results = container_client.managed_clusters.list_cluster_user_credentials(
                 resource_group_name=self.settings.aks_resource_group,
                 resource_name=self.settings.aks_cluster_name,
             )
@@ -815,10 +883,25 @@ class DeprovisioningService:
                     "operation": "deprovision_environment",
                     "branch_name": branch_name,
                     "step": "database_deletion",
+                    "expected_database_name": branch_name.replace("-", "_"),
+                    "postgres_server": self.settings.postgres_server_name,
+                    "postgres_host": self.settings.postgres_host,
                 },
             )
 
             try:
+                database_start_time = time.time()
+                self.logger.info(
+                    "Starting database deletion",
+                    extra={
+                        "correlation_id": self.correlation_id,
+                        "operation": "deprovision_environment",
+                        "branch_name": branch_name,
+                        "step": "database_deletion",
+                        "start_time": database_start_time,
+                    },
+                )
+
                 database_result = self.delete_database(branch_name)
                 operations["database_deleted"] = database_result["deleted"]
                 operations["database_name"] = database_result["database_name"]
